@@ -298,7 +298,7 @@ FreeApStartupCode (
   )
 {
   if (StartupCode != NULL) {
-    gBS->FreePages ((EFI_PHYSICAL_ADDRESS)(VOID *) StartupCode,
+    gBS->FreePages ((EFI_PHYSICAL_ADDRESS)(UINTN)(VOID*) StartupCode,
                     EFI_SIZE_TO_PAGES (sizeof (*StartupCode)));
   }
 }
@@ -328,3 +328,20 @@ StartApsStackless (
   return EFI_SUCCESS;
 }
 
+/**
+  Resets the Application Processor and directs it to jump to the
+  specified routine.
+
+  The processor jumps to this code in flat mode, but the processor's
+  stack is not initialized.
+
+  @param ProcessorId           the AP of ProcessorId was reset
+**/
+VOID
+ResetApStackless (
+  IN UINT32 ProcessorId
+  )
+{
+  SendInitSipiSipi (ProcessorId,
+                    (UINT32)(UINTN)(VOID*) StartupCode);
+}
