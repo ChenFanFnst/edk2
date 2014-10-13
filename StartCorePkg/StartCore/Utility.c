@@ -90,6 +90,7 @@ UTILITY_DATA   *mUtilityData = NULL;   ///< Pointer to private data for use in t
 **/
 STATIC
 EFI_STATUS
+EFIAPI
 PiCountProcessors (
   IN      MP_SERVICE_UTILITIES  *This,
       OUT UINTN                 *NumProc,
@@ -137,10 +138,11 @@ PiCountProcessors (
 **/
 STATIC
 EFI_STATUS
+EFIAPI
 PiGetProcessorInfo (
   IN      MP_SERVICE_UTILITIES     *This,
   IN      UINTN                     ProcessorNumber,
-      OUT TCB                      *Tcb
+  OUT     TCB                      *Tcb
   )
 {
   EFI_MP_SERVICES_PROTOCOL     *MpService;
@@ -207,6 +209,7 @@ PiGetProcessorInfo (
 **/
 STATIC
 EFI_STATUS
+EFIAPI
 PiStartThisAP (
   IN  MP_SERVICE_UTILITIES     *This,
   IN  EFI_AP_PROCEDURE          Procedure,
@@ -273,6 +276,7 @@ MP_SERVICE_UTILITIES  PiMpUtilities = {
 **/
 STATIC
 EFI_STATUS
+EFIAPI
 FrameworkCountProcessors (
   IN      MP_SERVICE_UTILITIES  *This,
       OUT UINTN                 *NumProc,
@@ -321,6 +325,7 @@ FrameworkCountProcessors (
 **/
 STATIC
 EFI_STATUS
+EFIAPI
 FrameworkGetProcessorInfo (
   IN      MP_SERVICE_UTILITIES     *This,
   IN      UINTN                     ProcessorNumber,
@@ -409,6 +414,7 @@ FrameworkGetProcessorInfo (
 **/
 STATIC
 EFI_STATUS
+EFIAPI
 FrameworkStartThisAP (
   IN  MP_SERVICE_UTILITIES     *This,
   IN  EFI_AP_PROCEDURE          Procedure,
@@ -581,13 +587,13 @@ GetMpInfo(
   {
     // Find the PI MpService protocol
     MpId = L"PI";
-    Status = gBS->LocateProtocol(&gEfiMpServiceProtocolGuid, NULL, &mUtilityData->PiMpService);
+    Status = gBS->LocateProtocol(&gEfiMpServiceProtocolGuid, NULL, (VOID**)&mUtilityData->PiMpService);
     if (EFI_ERROR(Status)) {
       Print(L"Unable to locate the %s MpServices procotol: %r\n", MpId, Status);
 
       // Find the Framework MpService protocol
       MpId = L"Framework";
-      Status = gBS->LocateProtocol(&gFrameworkEfiMpServiceProtocolGuid, NULL, &mUtilityData->FrameworkMpService);
+      Status = gBS->LocateProtocol(&gFrameworkEfiMpServiceProtocolGuid, NULL, (VOID**)&mUtilityData->FrameworkMpService);
       if (EFI_ERROR(Status)) {
         Print(L"Unable to locate the %s MpServices procotol: %r\n", MpId, Status);
         break;
