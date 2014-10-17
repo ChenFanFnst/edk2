@@ -19,7 +19,7 @@ Indicates the time limit in microseconds for the Client task to run.
 If the timeout expires before the Client task completes, then the Client task is
 terminated and the Client's processor becomes available to execute another task.
 **/
-#define PI_START_AP_TIMEOUT                 0  ///< Infinity
+#define PI_START_AP_TIMEOUT                 (100 * 1000)  ///< Infinity
 
 /** Client task timeout when using the Framework MP Services Protocol.
 If the value is zero, it means no timeout limit and the Client task will be
@@ -147,8 +147,31 @@ EFI_STATUS
   IN  MP_SERVICE_UTILITIES     *This,
   IN  EFI_AP_PROCEDURE          Procedure,
   IN  UINTN                     ProcessorNumber,
-  IN  VOID                      *ProcedureArgument
+  IN  VOID                     *ProcedureArgument
 );
+
+typedef
+EFI_STATUS
+(EFIAPI *MP_START_ALL_APS)(
+  IN  MP_SERVICE_UTILITIES     *This,
+  IN  EFI_AP_PROCEDURE          Procedure,
+  IN  VOID                     *ProcedureArgument
+);
+
+typedef
+EFI_STATUS
+(EFIAPI *MP_WHO_AM_I)(
+  IN  MP_SERVICE_UTILITIES     *This,
+  IN  VOID                     *ProcedureArgument
+);
+
+typedef
+EFI_STATUS
+(EFIAPI *MP_ENABLE_DISABLE_AP)(
+  IN  MP_SERVICE_UTILITIES     *This,
+  IN  TCB                      *Tcb
+);
+
 
 /** Containing structure for pointers to the MP Utility Functions.
   *
@@ -157,6 +180,9 @@ struct _MP_SERVICE_UTILITIES_ {
   MP_COUNT_PROCESSORS     GetNumberOfProcessors;
   MP_GET_PROCESSOR_INFO   GetProcessorInfo;
   MP_START_THIS_AP        StartThisAP;
+  MP_START_ALL_APS        StartAllAPs;
+  MP_ENABLE_DISABLE_AP    EnableDisableAP;
+  MP_WHO_AM_I             WhoAmI;
 };
 
 /** Verify that ProcNum specifies a valid, enabled, processor.
@@ -177,6 +203,14 @@ Validate(
   IN UINTN   ProcNum,
   IN TCB    *Tcb
 );
+
+EFI_STATUS
+LocateMpProtocol (
+  OUT MP_SERVICE_UTILITIES      **MpService,
+  OUT UINTN                      *NumProc,
+  OUT UINTN                      *NumEnabled
+);
+
 
 /** Find the MpService protocol and get the Number of CPUs in the system.
  *
@@ -203,11 +237,9 @@ Validate(
 EFI_STATUS
 EFIAPI
 GetMpInfo(
-      OUT  TCB                       *Tcb,
-      OUT MP_SERVICE_UTILITIES      **MpService,
-      OUT UINTN                      *NumProc,
-      OUT UINTN                      *NumEnabled,
-  IN      UINTN                       ProcNum
+  IN MP_SERVICE_UTILITIES       *MpService,
+  IN UINTN                       ProcNum,
+  OUT TCB                       *Tcb
 );
 
 /** Start the ClientTask on the target processor.
@@ -230,9 +262,23 @@ GetMpInfo(
 **/
 EFI_STATUS
 EFIAPI
-StartAPs(
-  IN TCB                  *Tcb,
-  IN MP_SERVICE_UTILITIES *MpService
+StartAP (
+  IN MP_SERVICE_UTILITIES *MpService,
+  IN TCB                  *Tcb
+);
+
+EFI_STATUS
+EFIAPI
+StartAllAPs (
+  IN MP_SERVICE_UTILITIES *MpService,
+  IN TCB                  *Tcb
+);
+
+EFI_STATUS
+EFIAPI
+EnableDisableAP (
+  IN MP_SERVICE_UTILITIES *MpService,
+  IN TCB                  *Tcb
 );
 
 #endif  // _STARTCORE_UTILITY_H_

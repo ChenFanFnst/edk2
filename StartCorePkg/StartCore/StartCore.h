@@ -50,13 +50,23 @@
 **/
 typedef struct {
             UINTN             ProcNum;    ///< Zero-based logical number of this processor.
-            UINTN             MaxCount;   ///< How high the client task should count.
             UINT32            StatusFlag; ///< Flags indicating if processor is BSP or Enabled
             UINT32            Package;    ///< Zero-based number of physical package containing this CPU
             UINT32            Core;       ///< Zero-based number of physical core within this package
             UINT32            Thread;     ///< Zero-based logical thread number within this core.
-  volatile  UINT32            Result;     ///< Communicate result to Root through here.
   volatile  UINT32            Ready;      ///< Flag to indicate Result is ready
+
+            EFI_EVENT         Event;
+  volatile  BOOLEAN           Delay;
+            BOOLEAN           Blocked;
+            BOOLEAN           Timeout;
+            BOOLEAN           SingleThread;
+            UINTN             ExpectNum;
+            VOID              *MpService;
+
+            BOOLEAN           Finished;
+            UINTN             *FailedCpuList;
+            BOOLEAN           Enabled;
 } TCB;
 
 /** Entry point function for the AP portion of the StartCore Application.
@@ -85,14 +95,5 @@ typedef struct {
 VOID
 EFIAPI
 ClientTask( IN VOID* parameter);
-
-/** Procedure that interacts with the Client task.
-  *
-  * @param[in]  Tcb   Pointer to the TCB for the Client task.
-  *
-**/
-VOID
-EFIAPI
-RootTask( IN TCB *Tcb);
 
 #endif  // _STARTCORE_H_

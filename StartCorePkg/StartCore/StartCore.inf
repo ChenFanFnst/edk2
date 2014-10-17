@@ -30,8 +30,7 @@
 [Sources]
   StartCore.c
   Utility.c
-  RootApp.c
-  ClientApp1.c
+  ClientApp.c
 
 [Packages]
   MdePkg/MdePkg.dec
@@ -46,6 +45,7 @@
   MemoryAllocationLib
   ShellCEntryLib
   PcdLib
+  TimerLib
 
 [Guids]
 
