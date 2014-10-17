@@ -154,7 +154,7 @@ PiGetProcessorInfo (
 
   // Retrieve detailed health, status, and location info about the target processor
   Status = MpService->GetProcessorInfo( MpService, ProcessorNumber, ProcessorInfoBuffer);
-  if( Status == EFI_SUCCESS)
+  if( Status == EFI_SUCCESS && Tcb)
   {
     Tcb->Package    = ProcessorInfoBuffer->Location.Package;
     Tcb->Core       = ProcessorInfoBuffer->Location.Core;
@@ -214,7 +214,66 @@ PiStartThisAP (
   IN  MP_SERVICE_UTILITIES     *This,
   IN  EFI_AP_PROCEDURE          Procedure,
   IN  UINTN                     ProcessorNumber,
-  IN  VOID                      *ProcedureArgument
+  IN  VOID                     *ProcedureArgument
+  )
+{
+  EFI_STATUS                  Status;
+  EFI_MP_SERVICES_PROTOCOL   *MpService;
+  UINTN                       Timeout;
+  TCB                         *Tcb;
+
+  MpService = mUtilityData->PiMpService;
+
+  Tcb = (TCB *) ProcedureArgument;
+  if (Tcb->Timeout) {
+    Timeout = PI_START_AP_TIMEOUT;
+  } else {
+    Timeout = 0;
+  }
+
+  // Start our Application on the specified CPU.
+  // Successful AP startup should return EFI_SUCCESS.
+  Status = MpService->StartupThisAP(MpService, Procedure, ProcessorNumber, Tcb->Event,
+                                    Timeout, ProcedureArgument, &Tcb->Finished);
+  return Status;
+}
+
+STATIC
+EFI_STATUS
+EFIAPI
+PiStartAllAPs (
+  IN  MP_SERVICE_UTILITIES     *This,
+  IN  EFI_AP_PROCEDURE          Procedure,
+  IN  VOID                     *ProcedureArgument
+  )
+{
+  EFI_STATUS                  Status;
+  EFI_MP_SERVICES_PROTOCOL   *MpService;
+  UINTN                       Timeout;
+  TCB                         *Tcb;
+
+  MpService = mUtilityData->PiMpService;
+
+  Tcb = (TCB *) ProcedureArgument;
+  if (Tcb->Timeout) {
+    Timeout = PI_START_AP_TIMEOUT;
+  } else {
+    Timeout = 0;
+  }
+
+  // Start our Application on the specified CPU.
+  // Successful AP startup should return EFI_SUCCESS.
+  Status = MpService->StartupAllAPs(MpService, Procedure, Tcb->SingleThread, Tcb->Event,
+                                    Timeout, ProcedureArgument, &Tcb->FailedCpuList);
+  return Status;
+}
+
+STATIC
+EFI_STATUS
+EFIAPI
+PiEnableDisableAP (
+  IN      MP_SERVICE_UTILITIES     *This,
+  IN      TCB                      *Tcb
   )
 {
   EFI_STATUS                  Status;
@@ -222,14 +281,32 @@ PiStartThisAP (
 
   MpService = mUtilityData->PiMpService;
 
-  // Start our Application on the specified CPU.
-  // Successful AP startup should return EFI_SUCCESS.
-  Status = MpService->StartupThisAP(  MpService, Procedure, ProcessorNumber, mUtilityData->Event,
-                                      PI_START_AP_TIMEOUT, ProcedureArgument, NULL);
-  Print(L"Starting Application on CPU %d: %r\n", (UINT32)ProcessorNumber, Status);
-
+  Status = MpService->EnableDisableAP(MpService, Tcb->ProcNum, Tcb->Enabled, NULL);
   return Status;
 }
+
+STATIC
+EFI_STATUS
+EFIAPI
+PiWhoAmI (
+  IN  MP_SERVICE_UTILITIES     *This,
+  IN  VOID                     *ProcedureArgument
+  )
+{
+  EFI_STATUS                  Status;
+  EFI_MP_SERVICES_PROTOCOL   *MpService;
+  TCB                         *Tcb;
+
+  MpService = mUtilityData->PiMpService;
+
+  Tcb = (TCB *) ProcedureArgument;
+
+  // Start our Application on the specified CPU.
+  // Successful AP startup should return EFI_SUCCESS.
+  Status = MpService->WhoAmI(MpService, &Tcb->ExpectNum);
+  return Status;
+}
+
 
 /** The PI instance of the MP Utilities function container.
   *
@@ -244,7 +321,10 @@ STATIC
 MP_SERVICE_UTILITIES  PiMpUtilities = {
   PiCountProcessors,
   PiGetProcessorInfo,
-  PiStartThisAP
+  PiStartThisAP,
+  PiStartAllAPs,
+  PiEnableDisableAP,
+  PiWhoAmI
 };
 
 /* ############################################################################
@@ -368,10 +448,10 @@ FrameworkGetProcessorInfo (
   }
 
   // Display Context Buffer
-  Print(L" ApicID   Enabled   Type   Health   Pkg   Core  Thread\n");
+  Print(L" ProcNum   Enabled   Type   Health   Pkg   Core  Thread\n");
   Print(L"--------  --------  ----  -------- -----  ----  ------\n");
   Print(L"%08x      %s      %3s  %08x  %4d    %2d      %d\n\n",
-      ProcessorContextBuffer->ApicID,
+      Tcb->ProcNum,
       (ProcessorContextBuffer->Enabled) ? L"Y" : L"N",
       (ProcessorContextBuffer->Designation == EfiCpuBSP) ? L"BSP" : L" AP",
       ProcessorContextBuffer->Health.Flags.Uint32,
@@ -546,6 +626,48 @@ Validate(
   return Status;
 }
 
+EFI_STATUS
+LocateMpProtocol (
+  OUT MP_SERVICE_UTILITIES      **MpService,
+  OUT UINTN                      *NumProc,
+  OUT UINTN                      *NumEnabled
+  )
+{
+  MP_SERVICE_UTILITIES     *MpUtilities;
+  CHAR16                   *MpId;
+  EFI_STATUS                Status;
+
+  // Find the PI MpService protocol
+  MpId = L"PI";
+  Status = gBS->LocateProtocol(&gEfiMpServiceProtocolGuid, NULL, (VOID**)&mUtilityData->PiMpService);
+  if (EFI_ERROR(Status)) {
+    Print(L"Unable to locate the %s MpServices procotol: %r\n", MpId, Status);
+
+    // Find the Framework MpService protocol
+    MpId = L"Framework";
+    Status = gBS->LocateProtocol(&gFrameworkEfiMpServiceProtocolGuid, NULL, (VOID**)&mUtilityData->FrameworkMpService);
+    if (EFI_ERROR(Status)) {
+      Print(L"Unable to locate the %s MpServices procotol: %r\n", MpId, Status);
+    }
+    MpUtilities = &FrameworkMpUtilities;  // Save pointer to the Framework MP Utilities
+  } else {                                // OR
+    MpUtilities = &PiMpUtilities;         // Save pointer to the PI MP Utilities
+  }
+  *MpService = MpUtilities;               // Point the caller to the MP Utilities
+  Print(L"Successfully located the %s MpService protocol.\n", MpId);
+
+  // Get the total number and number of enabled processors
+  Status = MpUtilities->GetNumberOfProcessors( MpUtilities, NumProc, NumEnabled);
+  if (EFI_ERROR(Status)) {
+    Print(L"Unable to get the number of processors: %r\n", Status);
+  }
+
+  Print(L"This platform has %d logical processors of which %d are enabled.\n",
+        (UINT32)*NumProc, (UINT32)*NumEnabled);
+
+  return Status;
+}
+
 /** Find the MpService protocol and get the Number of CPUs in the system.
  *
  *  Find the MpService protocol and get the Number of CPUs in the system.
@@ -572,75 +694,18 @@ Validate(
 EFI_STATUS
 EFIAPI
 GetMpInfo(
-      OUT  TCB                       *Tcb,
-      OUT MP_SERVICE_UTILITIES      **MpService,
-      OUT UINTN                      *NumProc,
-      OUT UINTN                      *NumEnabled,
-  IN      UINTN                       ProcNum
+  IN MP_SERVICE_UTILITIES            *MpService,
+  IN UINTN                           ProcNum,
+  OUT TCB                            *Tcb
 )
 {
-  MP_SERVICE_UTILITIES     *MpUtilities;
-  CHAR16                   *MpId;
   EFI_STATUS                Status;
 
-  do
-  {
-    // Find the PI MpService protocol
-    MpId = L"PI";
-    Status = gBS->LocateProtocol(&gEfiMpServiceProtocolGuid, NULL, (VOID**)&mUtilityData->PiMpService);
-    if (EFI_ERROR(Status)) {
-      Print(L"Unable to locate the %s MpServices procotol: %r\n", MpId, Status);
-
-      // Find the Framework MpService protocol
-      MpId = L"Framework";
-      Status = gBS->LocateProtocol(&gFrameworkEfiMpServiceProtocolGuid, NULL, (VOID**)&mUtilityData->FrameworkMpService);
-      if (EFI_ERROR(Status)) {
-        Print(L"Unable to locate the %s MpServices procotol: %r\n", MpId, Status);
-        break;
-      }
-      MpUtilities = &FrameworkMpUtilities;  // Save pointer to the Framework MP Utilities
-      // Framework: I am running on the BSP.  Find out my logical processor number.
-      Status = mUtilityData->FrameworkMpService->WhoAmI( mUtilityData->FrameworkMpService, &mUtilityData->BspId);
-    }
-    else {                                // OR
-      MpUtilities = &PiMpUtilities;         // Save pointer to the PI MP Utilities
-      // PI: I am running on the BSP.  Find out my logical processor number.
-      Status = mUtilityData->PiMpService->WhoAmI( mUtilityData->PiMpService, &mUtilityData->BspId);
-    }
-    if (EFI_ERROR(Status)) {
-      Print(L"%s WhoAmI failed: %r\n", MpId, Status);
-      break;
-    }
-    *MpService = MpUtilities;               // Point the caller to the MP Utilities
-    Print(L"Successfully located the %s MpService protocol.\n", MpId);
-
-    // Get the total number and number of enabled processors
-    Status = MpUtilities->GetNumberOfProcessors( MpUtilities, NumProc, NumEnabled);
-    if (EFI_ERROR(Status)) {
-      Print(L"Unable to get the number of processors: %r\n", Status);
-      break;
-    }
-
-    Print(L"This platform has %d logical processors of which %d are enabled.\n",
-          (UINT32)*NumProc, (UINT32)*NumEnabled);
-    if( *NumEnabled < 2 ) {
-      Print(L"Two or more enabled processors are required to run this application.\n\n");
-      Status = EFI_DEVICE_ERROR;
-      break;
-    }
-    if ( *NumProc <= ProcNum ) {
-      Print(L"Requested target processor %d is out of range.\n", (UINT32)ProcNum);
-      Status = EFI_NOT_FOUND;
-      break;
-    }
-
-    // Retrieve detailed health, status, and location info about the target processor
-    Status = MpUtilities->GetProcessorInfo( MpUtilities, ProcNum, Tcb);
-    if (EFI_ERROR(Status)) {
-      Print(L"Unable to get information for processor %d: %r\n", (UINT32)ProcNum, Status);
-      break;
-    }
-  } while( FALSE );
+  // Retrieve detailed health, status, and location info about the target processor
+  Status = MpService->GetProcessorInfo(MpService, ProcNum, Tcb);
+  if (EFI_ERROR(Status)) {
+    Print(L"    Unable to get information for processor %d: %r\n", (UINT32)ProcNum, Status);
+  }
 
   return Status;
 }
@@ -665,9 +730,9 @@ GetMpInfo(
 **/
 EFI_STATUS
 EFIAPI
-StartAPs(
-  IN TCB                  *Tcb,
-  IN MP_SERVICE_UTILITIES *MpService
+StartAP (
+  IN MP_SERVICE_UTILITIES *MpService,
+  IN TCB                  *Tcb
   )
 {
   EFI_STATUS    Status;
@@ -677,19 +742,125 @@ StartAPs(
   ProcNum = Tcb->ProcNum;           // Which AP to run on
 
   // Create an Event, which is required to call StartupThisAP in non-blocking mode
-  Status = gBS->CreateEvent( 0, TPL_NOTIFY, NULL, NULL, &mUtilityData->Event);
-  if(Status == EFI_SUCCESS)
-  {
-    Print(L"Successfull Event creation.\n");
-    // Start our Application on the specified CPU.
-    Status = MpService->StartThisAP(  MpService, ClientTask, ProcNum, Tcb);
+  if (!Tcb->Blocked) {
+    Status = gBS->CreateEvent(0, TPL_CALLBACK, NULL, NULL, &Tcb->Event);
     if(Status == EFI_SUCCESS) {
-      Print(L"Application successfully started.\n");
+    } else {
+      Print(L"    failed Event creation.%r \n", Status);
     }
-    else Print(L"Failed to start Application on CPU %d: %r\n", (UINT32)ProcNum, Status);
+  } else {
+    Tcb->Event = NULL;
   }
-  else {
-    Print(L"Event creation failed: %r\n", Status);
+
+  // Start our Application on the specified CPU.
+  Status = MpService->StartThisAP(MpService, ClientTask, ProcNum, (VOID *)Tcb);
+  if(Status == EFI_SUCCESS) {
+    Print(L"  result: Application successfully started.\n");
   }
+  else Print(L"  result: Failed to start Application on CPU %d: %r\n", (UINT32)ProcNum, Status);
+
+  if (!Tcb->Blocked) {
+    if (Status == EFI_SUCCESS) {
+      do {
+        Status = gBS->CheckEvent(Tcb->Event);
+        CpuPause ();
+      } while (EFI_ERROR(Status));
+      Print(L"    Wait Finished Status: %d.\n", Tcb->Finished);
+    }
+    gBS->CloseEvent(Tcb->Event);
+  }
+
+  return Status;
+}
+
+/** Start the ClientTask on the All processor.
+ *
+ *  Creates an Event which signals when the target processor completes
+ *  its task.  This is required in order to start the target in non-blocking
+ *  mode.  The ClientTask is then started on the All target processor 
+ *  The pointer to the task's TCB is passed to the ClientTask as its only parameter.
+ *
+ *  @param[in]  Tcb
+ *  @param[in]  MpService
+ *
+ *  @retval EFI_SUCCESS           The Client Task was successfully started.
+ *  @retval EFI_OUT_OF_RESOURCES  The Event could not be created.
+ *  @retval EFI_DEVICE_ERROR      This function was not called by the BSP.
+ *  @retval EFI_NOT_READY         The target processor is busy.
+ *  @retval EFI_NOT_FOUND         The target processor specified in Tcb does not exist.
+ *  @retval EFI_INVALID_PARAMETER The specified target processor is disabled or is the BSP.
+ *
+**/
+EFI_STATUS
+EFIAPI
+StartAllAPs (
+  IN MP_SERVICE_UTILITIES *MpService,
+  IN TCB                  *Tcb
+  )
+{
+  EFI_STATUS    Status;
+  UINTN         i;
+  UINTN         Cpu;
+  UINTN         *FailedList;
+
+  // Create an Event, which is required to call StartupAllAPs in non-blocking mode
+  if (!Tcb->Blocked) {
+    Status = gBS->CreateEvent(0, TPL_CALLBACK, NULL, NULL, &Tcb->Event);
+    if(Status == EFI_SUCCESS) {
+    } else {
+      Print(L"    failed Event creation.%r \n", Status);
+    }
+  } else {
+    Tcb->Event = NULL;
+  }
+
+  // Start our Application on the specified CPU.
+  Status = MpService->StartAllAPs(MpService, ClientTask, (VOID *)Tcb);
+  if(Status == EFI_SUCCESS) {
+    Print(L"  result: Applications successfully started.\n");
+  }
+  else Print(L"  result: Failed to start Applications on CPUs: %r\n", Status);
+
+  if (!Tcb->Blocked) {
+    if (Status == EFI_SUCCESS) {
+      do {
+        Status = gBS->CheckEvent(Tcb->Event);
+        CpuPause ();
+      } while (EFI_ERROR(Status));
+      if (Tcb->FailedCpuList != NULL) {
+        Print(L"    Wait with Failed value:");
+        FailedList = Tcb->FailedCpuList;
+        for (i = 0; i < 10; i++) {
+          Cpu =  *FailedList;
+          FailedList++;
+          if (Cpu == END_OF_CPU_LIST) break;
+          Print(L"%d,", Cpu);
+        }
+        Print(L" \n");
+        FreePool (Tcb->FailedCpuList);
+      }
+    }
+    gBS->CloseEvent(Tcb->Event);
+  }
+
+  return Status;
+}
+
+EFI_STATUS
+EFIAPI
+EnableDisableAP (
+  IN MP_SERVICE_UTILITIES *MpService,
+  IN TCB                  *Tcb
+  )
+{
+  EFI_STATUS Status;
+
+  Status = MpService->EnableDisableAP(MpService, Tcb);
+  if (Status == EFI_SUCCESS) {
+    GetMpInfo(MpService, Tcb->ProcNum, NULL);
+  } else {
+    Print(L"  result: Failed with %r\n", Status);
+  }
+
   return Status;
 }

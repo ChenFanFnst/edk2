@@ -29,13 +29,6 @@
 ###                                                                         ###
 ############################################################################ */
 
-STATIC CHAR16   UseStr[]      = L"\n\
-Usage Syntax:\n\
-  %s: CpuNum\n\n\
-  CpuNum is a zero-based decimal number specifying which Core (CPU) to run\n\
-  the application on.\n\n\
-";
-
 /** Pointer to the Task Status and Control structure for the target processor.
   * For this demo application it only allows a single task on a single processor core,
   * there is no need for anything more complex.
@@ -43,71 +36,28 @@ Usage Syntax:\n\
   * For applications using multiple APs, "Tcb" could be an array of TCB structures,
   * one for each logical processor in the platform.
 **/
-STATIC
-TCB *mTcb = NULL;
+STATIC TCB *mTcb = NULL;
 
-/** Display a help message describing the usage of the StartCore application.
-  *
-  * Displays a helpful message showing the proper invocation syntax
-  * for this application. This function is local to this file and is only
-  * called by GetArgument.
-  *
-  * @param[in]  MyName  The name of this application; "StartCore".
-  *
-**/
-STATIC
-VOID
-Usage(
-  IN CHAR16 *MyName
-  )
-{
-  Print(UseStr, MyName);
-}
+#define DO_TEST_STARTAP(MpServiceArg, TcbArg)             \
+  do {                                                    \
+    Status = StartAP (MpServiceArg, TcbArg);              \
+  } while (FALSE)
 
-/** Parse the application's command line.
- *
- *  The application is passed a single integer argument which
- *  specifies which CPU is to be started.
- *
- *  The CPU number is zero-based.  The BSP is usually CPU 0.
- *  The BSP may not be specified as the target processor.
- *
- *  @param[in]  Argc    The number of tokens on the command line.
- *  @param[in]  Argv    Pointer to a list of pointers to the command line tokens.
- *  @param[out] CpuNum  Pointer to where the extracted argument is to be stored.
- *
- *  @retval EFI_SUCCESS             The function completed successfully.
- *  @retval EFI_INVALID_PARAMETER   No command line argument provided.
- *
-**/
-STATIC
-EFI_STATUS
-GetArgument(
-  IN      UINTN     Argc,
-  IN      CHAR16  **Argv,
-     OUT  UINTN    *CpuNum
-)
-{
-  EFI_STATUS    Status  = EFI_INVALID_PARAMETER;
-  UINTN         Index;
+#define DO_TEST_STARTALLAPS(MpServiceArg, TcbArg)         \
+  do {                                                    \
+    Status = StartAllAPs (MpServiceArg, TcbArg);          \
+  } while (FALSE)
 
-  if( Argc < 2) {
-    Print(L"The target CPU number must be specified.  Try again!\n");
-    Usage(Argv[0]);
-  }
-  else {
-    if ( Argc > 2 ) {
-      Print(L"%s: invoked with %d parameters\n", Argv[0], Argc);
-      Print(L"%d extra arguments ignored.\n", Argc - 2);
-      for (Index = 0; Index < Argc; Index++) {
-        Print(L"    Argv[%d]: %s\n", Index, Argv[Index]);
-      }
-    }
-    *CpuNum = StrDecimalToUintn(Argv[1]);
-    Status = EFI_SUCCESS;
-  }
-  return Status;
-}
+#define DO_TEST_GETMPINFO(MpServiceArg, NumArg, TcbArg)   \
+  do {                                                    \
+    Status = GetMpInfo (MpServiceArg, NumArg, TcbArg);    \
+  } while (FALSE)
+
+#define DO_TEST_ENABLEDISABLEAP(MpServiceArg, TcbArg)     \
+  do {                                                    \
+    Status = EnableDisableAP (MpServiceArg, TcbArg);      \
+  } while (FALSE)
+
 
 /* ############################################################################
 ###                                                                         ###
@@ -134,9 +84,9 @@ ShellAppMain (
   )
 {
   MP_SERVICE_UTILITIES       *MpService;  // Mp Service Utilities pointer
-  UINTN                       ProcNum;    // The CPU selected for the demo task
   UINTN                       NumProc;    // Number of logical CPUs in the system
   UINTN                       NumEnabled; // Number of enabled logical CPUs in the system
+  UINTN                       Number;
   EFI_STATUS                  Status;
 
   /* The do-while loop is used as a poor-man's exception handling capability.
@@ -160,28 +110,217 @@ ShellAppMain (
       break;
     }
 
-    // Get command line argument specifying the processor (AP) number.
-    Status = GetArgument( Argc, Argv, &ProcNum);
-    if(EFI_ERROR (Status)) break;
+    // locate Mp Protocol
+    Status = LocateMpProtocol (&MpService, &NumProc, &NumEnabled);
+    if (EFI_ERROR (Status)) break;
 
-    // Get MpService pointer and data
-    Status = GetMpInfo( mTcb, &MpService, &NumProc, &NumEnabled, ProcNum);
-    if(EFI_ERROR (Status)) break;
+    mTcb->MpService = (VOID*) MpService;
 
-    // Initialize Task Control Block
-    mTcb->ProcNum   = ProcNum;      // Cpu the Client is to run on
-    mTcb->MaxCount  = NUMLOOPS;     // Number of loops Client is to perform before returning.
-    mTcb->Ready     = 0;            // No results are ready yet
+    // WhoAmI ()
+    Print(L"===================================\n");
+    Print(L"Testing : WhoAmI\n");
+    Print(L"===================================\n");
+    for (Number = 0; Number < NumProc; Number++) {
+      {
+        mTcb->ProcNum = Number;
+        mTcb->Blocked = TRUE;
+        mTcb->Timeout = TRUE;
+        mTcb->Delay = FALSE;
+      }
+      DO_TEST_STARTAP (MpService, mTcb);
+      Print(L"  expected: %d, Result: %d\n", Number, mTcb->ExpectNum);
+    }
 
-    // Check the validity of the requested target core
-    Status = Validate( ProcNum, mTcb);
-    if(EFI_ERROR (Status)) break;
+    // GetProcessorInfo()
+    for (Number = 0; Number < NumProc; Number++) {
+      DO_TEST_GETMPINFO(MpService, Number, mTcb);
+    }
 
-    // Start the Application Processors
-    Status = StartAPs(mTcb, MpService);
-    if(EFI_ERROR (Status)) break;
+    //
+    // StartupThisAP ()
+    //
+    // Test Blocked status + timeout infinity.
+    Print(L"===================================\n");
+    Print(L"Testing StartupThisAP.\n");
+    Print(L"===================================\n");
+    Print(L"Testing 1: Block + AP reset after timeout\n");
+    Print(L"  expected: Time out\n");
+    {
+      mTcb->ProcNum = 1;  // Processor 1
+      mTcb->Blocked = TRUE;
+      mTcb->Timeout = TRUE;
+      mTcb->Delay = TRUE;
+    }
+    DO_TEST_STARTAP (MpService, mTcb);
 
-    RootTask(mTcb);   // Start the part of the application that runs on the Boot Core
+    Print(L"Testing 2: Block + AP return before timeout\n");
+    Print(L"  expected: Success\n");
+    {
+      mTcb->ProcNum = 2;  // Processor 2
+      mTcb->Blocked = TRUE;
+      mTcb->Timeout = TRUE;
+      mTcb->Delay = FALSE;
+    }
+    DO_TEST_STARTAP (MpService, mTcb);
+
+    // Test not Blocked status + timeout infinity.
+    // Test not Blocked status + AP reset after timeout
+    Print(L"Testing 3: non-Block + AP reset after timeout\n");
+    Print(L"  expected: Time out\n");
+    {
+      mTcb->ProcNum = 1;
+      mTcb->Blocked = FALSE;
+      mTcb->Timeout = TRUE;
+      mTcb->Delay = TRUE;
+    }
+    DO_TEST_STARTAP (MpService, mTcb);
+
+    // Test not Blocked Status + AP return before timeout
+    Print(L"Testing 4: non-Block + AP return before timeout\n");
+    Print(L"  expected: Success\n");
+    {
+      mTcb->ProcNum = 2;
+      mTcb->Blocked = FALSE;
+      mTcb->Timeout = TRUE;
+      mTcb->Delay = FALSE;
+    }
+    DO_TEST_STARTAP (MpService, mTcb);
+
+    Print(L"Testing 5: ProcNum > maxcpu \n");
+    Print(L"  expected: not found\n");
+    {
+      mTcb->ProcNum = NumProc;
+      mTcb->Blocked = FALSE;
+      mTcb->Timeout = TRUE;
+      mTcb->Delay = FALSE;
+    }
+    DO_TEST_STARTAP (MpService, mTcb);
+
+    //
+    // StartupAllAPs ()
+    //
+    // Test Blocked status + timeout infinity.
+    // Test Blocked status + APs reset after timeout
+    Print(L"=======================================\n");
+    Print(L"Testing StartupAllAPs.\n");
+    Print(L"=======================================\n");
+    Print(L"Testing 1: Block + APs reset after timeout\n");
+    Print(L"  expected: Time out\n");
+    {
+      mTcb->SingleThread = FALSE;
+      mTcb->Blocked = TRUE;
+      mTcb->Timeout = TRUE;
+      mTcb->Delay = TRUE;
+    }
+    DO_TEST_STARTALLAPS (MpService, mTcb);
+    // SingleThread True
+    {
+      mTcb->SingleThread = TRUE;
+      mTcb->Blocked = TRUE;
+      mTcb->Timeout = TRUE;
+      mTcb->Delay = TRUE;
+    }
+    DO_TEST_STARTALLAPS (MpService, mTcb);
+
+    // Test Blocked Status + APs return before timeout
+    Print(L"Testing 2: Block + APs return before timeout\n");
+    Print(L"  expected: Success\n");
+    {
+      mTcb->SingleThread = FALSE;
+      mTcb->Blocked = TRUE;
+      mTcb->Timeout = TRUE;
+      mTcb->Delay = FALSE;
+    }
+    DO_TEST_STARTALLAPS (MpService, mTcb);
+    // SingleThread True
+    {
+      mTcb->SingleThread = TRUE;
+      mTcb->Blocked = TRUE;
+      mTcb->Timeout = TRUE;
+      mTcb->Delay = FALSE;
+    }
+    DO_TEST_STARTALLAPS (MpService, mTcb);
+
+    // Test not Blocked status + timeout infinity.
+    // Test not Blocked status + APs reset excessed timeout
+    Print(L"Testing 3: non-Block + APs reset after timeout\n");
+    Print(L"  expected: Time out\n");
+    {
+      mTcb->SingleThread = FALSE;
+      mTcb->Blocked = FALSE;
+      mTcb->Timeout = TRUE;
+      mTcb->Delay = TRUE;
+    }
+    DO_TEST_STARTALLAPS (MpService, mTcb);
+    // SingleThread TRUE
+    {
+      mTcb->SingleThread = TRUE;
+      mTcb->Blocked = FALSE;
+      mTcb->Timeout = TRUE;
+      mTcb->Delay = TRUE;
+    }
+    DO_TEST_STARTALLAPS (MpService, mTcb);
+
+    Print(L"Testing 4: non-Block + APs return before timeout\n");
+    Print(L"  expected: Success\n");
+    {
+      mTcb->SingleThread = FALSE;
+      mTcb->Blocked = FALSE;
+      mTcb->Timeout = TRUE;
+      mTcb->Delay = FALSE;
+    }
+    DO_TEST_STARTALLAPS (MpService, mTcb);
+    // SingleThread TRUE
+    {
+      mTcb->SingleThread = TRUE;
+      mTcb->Blocked = FALSE;
+      mTcb->Timeout = TRUE;
+      mTcb->Delay = FALSE;
+    }
+    DO_TEST_STARTALLAPS (MpService, mTcb);
+
+    //
+    // EnableDisableAP
+    //
+    Print(L"===================================\n");
+    Print(L"Testing EnableDisableAP\n");
+    Print(L"===================================\n");
+    Print(L"Testing 1: Disable BSP\n");
+    Print(L"  expected: invalid parameter\n");
+    {
+      mTcb->ProcNum = 0;
+      mTcb->Enabled = FALSE;
+    }
+    DO_TEST_ENABLEDISABLEAP (MpService, mTcb);
+    Print(L"Testing 2: ProcNum > maxNum\n");
+    Print(L"  expected: not found\n");
+    {
+      mTcb->ProcNum = NumProc;
+      mTcb->Enabled = FALSE;
+    }
+    DO_TEST_ENABLEDISABLEAP (MpService, mTcb);
+
+    Print(L"Testing 3: Disable AP 1\n");
+    Print(L"  expected: success\n");
+    {
+      mTcb->ProcNum = 1;
+      mTcb->Enabled = FALSE;
+    }
+    DO_TEST_ENABLEDISABLEAP (MpService, mTcb);
+    {
+      mTcb->ProcNum = 1;
+      mTcb->Blocked = FALSE;
+      mTcb->Timeout = FALSE;
+      mTcb->Delay = FALSE;
+    }
+    DO_TEST_STARTAP (MpService, mTcb);
+    {
+      mTcb->ProcNum = 1;
+      mTcb->Enabled = TRUE;
+    }
+    DO_TEST_ENABLEDISABLEAP (MpService, mTcb);
+
+    Print(L"Tests end\n");
 
     FreePool( mTcb);        // Free the Task Control Block
     UtilityDestructor();    // Free any dynamic resources the Utility Functions consumed
