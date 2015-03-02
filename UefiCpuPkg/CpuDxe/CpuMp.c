@@ -130,6 +130,7 @@ SetApState (
   )
 {
   GetMpSpinLock (CpuData);
+  CpuData->PreState = CpuData->State;
   CpuData->State = State;
   ReleaseMpSpinLock (CpuData);
 }
@@ -615,6 +616,7 @@ StartupAllAPs (
   CPU_DATA_BLOCK        *CpuData;
   UINTN                 Number;
   CPU_STATE             APInitialState;
+  CPU_STATE             CpuState;
 
   CpuData = NULL;
 
@@ -655,7 +657,9 @@ StartupAllAPs (
       continue;
     }
 
-    if (GetApState (CpuData) != CpuStateIdle) {
+    CpuState = GetApState (CpuData);
+    if (CpuState != CpuStateIdle &&
+        CpuState != CpuStateSleeping) {
       return EFI_NOT_READY;
     }
   }
@@ -694,7 +698,9 @@ StartupAllAPs (
     // state 1 by 1, until the previous 1 finished its task
     // if not "SingleThread", all APs are put to ready state from the beginning
     //
-    if (GetApState (CpuData) == CpuStateIdle) {
+    CpuState = GetApState (CpuData);
+    if (CpuState == CpuStateIdle ||
+        CpuState == CpuStateSleeping) {
       mMpSystemData.StartCount++;
 
       SetApState (CpuData, APInitialState);
@@ -847,6 +853,7 @@ StartupThisAP (
   )
 {
   CPU_DATA_BLOCK        *CpuData;
+  CPU_STATE             CpuState;
 
   CpuData = NULL;
 
@@ -877,7 +884,9 @@ StartupThisAP (
     return EFI_INVALID_PARAMETER;
   }
 
-  if (GetApState (CpuData) != CpuStateIdle) {
+  CpuState = GetApState (CpuData);
+  if (CpuState != CpuStateIdle &&
+      CpuState != CpuStateSleeping) {
     return EFI_NOT_READY;
   }
 
@@ -1176,11 +1185,15 @@ ProcessorToIdleState (
   }
 
   //
-  // Avoid forcibly reset AP caused the AP State is not updated.
+  // Avoid forcibly reset AP caused the AP State is not updated,
+  // and if AP previous State is not sleeping, we should set
+  // Procedure NULL avoid AP execution repeated.
   //
   GetMpSpinLock (CpuData);
-  CpuData->State = CpuStateIdle;
-  CpuData->Procedure = NULL;
+  if (CpuData->PreState != CpuStateSleeping) {
+    CpuData->Procedure = NULL;
+    CpuData->State = CpuStateIdle;
+  }
   ReleaseMpSpinLock (CpuData);
 
   while (TRUE) {
@@ -1196,6 +1209,13 @@ ProcessorToIdleState (
       CpuData->Procedure = NULL;
       CpuData->State = CpuStateFinished;
       ReleaseMpSpinLock (CpuData);
+    } else {
+      //
+      // if no procedure to execution, we simply put AP
+      // into sleep state, and waiting BSP sent SIPI.
+      //
+      SetApState (CpuData, CpuStateSleep);
+      CpuSleep ();
     }
 
     CpuPause ();

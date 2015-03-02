@@ -80,7 +80,8 @@ typedef enum {
   CpuStateBlocked,
   CpuStateReady,
   CpuStateBusy,
-  CpuStateFinished
+  CpuStateFinished,
+  CpuStateSleeping
 } CPU_STATE;
 
 /**
@@ -92,6 +93,7 @@ typedef struct {
   SPIN_LOCK                      CpuDataLock;
   INTN                           LockSelf;
   CPU_STATE                      State;
+  CPU_STATE                      PreState;
 
   EFI_AP_PROCEDURE               Procedure;
   VOID                           *Parameter;
