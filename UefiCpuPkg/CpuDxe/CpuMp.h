@@ -91,7 +91,7 @@ typedef struct {
   EFI_PROCESSOR_INFORMATION      Info;
   SPIN_LOCK                      CpuDataLock;
   INTN                           LockSelf;
-  volatile CPU_STATE             State;
+  CPU_STATE                      State;
 
   EFI_AP_PROCEDURE               Procedure;
   VOID                           *Parameter;
